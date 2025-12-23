@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>スライドパズル</title>
+<style>
+  :root{
+    --bg:#f3f5f7;
+    --card:#ffffff;
+    --tile:#2e7d32;
+    --tile2:#388e3c;
+    --empty:#cfd8dc;
+    --text:#0f172a;
+  }
+
+  html, body{
+    height:100%;
+    margin:0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overscroll-behavior: none;
+  }
+
+  /* スマホでのダブルタップズーム/スクロール干渉を減らす */
+  body{
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .wrap{
+    min-height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+    box-sizing:border-box;
+  }
+
+  .card{
+    width: min(92vw, 520px);
+    background: var(--card);
+    border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+    padding: 16px;
+    box-sizing:border-box;
+  }
+
+  h1{
+    margin: 2px 0 6px;
+    font-size: clamp(18px, 4.5vw, 26px);
+    letter-spacing: .5px;
+  }
+  .sub{
+    margin: 0 0 12px;
+    color: rgba(15, 23, 42, 0.75);
+    font-size: clamp(12px, 3.2vw, 14px);
+    line-height: 1.35;
+  }
+
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .stats{
+    display:flex;
+    gap:12px;
+    font-weight: 700;
+    font-size: clamp(12px, 3.2vw, 14px);
+  }
+  .stats span b{ font-variant-numeric: tabular-nums; }
+
+  #board{
+    width: min(88vw, 420px);
+    aspect-ratio: 1 / 1;            /* 盤面は常に正方形 */
+    margin: 0 auto 14px;
+    display:grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: clamp(6px, 1.8vw, 10px);
+    touch-action: manipulation;
+  }
+
+  .tile{
+    border-radius: 14px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight: 900;
+    font-size: clamp(22px, 7vw, 42px);
+    color: #fff;
+    background: linear-gradient(180deg, var(--tile2), var(--tile));
+    box-shadow: 0 6px 18px rgba(46,125,50,0.25);
+    cursor: pointer;
+    user-select:none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .tile:active{
+    transform: scale(0.985);
+  }
+
+  .empty{
+    background: var(--empty);
+    box-shadow: none;
+    cursor: default;
+  }
+
+  .btns{
+    display:flex;
+    gap:10px;
+    justify-content:center;
+    flex-wrap:wrap;
+  }
+
+  button{
+    appearance:none;
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 16px;
+    font-weight: 800;
+    cursor: pointer;
+    background: #111827;
+    color: #fff;
+    min-width: 140px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button.secondary{
+    background: #e5e7eb;
+    color:#111827;
+  }
+  button:active{ transform: scale(0.99); }
+
+  /* クリア演出（alertの代わり） */
+  #toast{
+    position: fixed;
+    left: 50%;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    background: rgba(17,24,39,0.92);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 999px;
+    font-weight: 900;
+    letter-spacing: .3px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease;
+  }
+  #toast.show{ opacity: 1; }
+</style>
+</head>
+
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="topbar">
+      <div>
+        <h1>スライドパズル</h1>
+        <p class="sub">数字を順番に並べよう！（スマホ最適化・必ず解けるシャッフル）</p>
+      </div>
+      <div class="stats">
+        <span>手数: <b id="moves">0</b></span>
+        <span>時間: <b id="time">0</b>s</span>
+      </div>
+    </div>
+
+    <div id="board" aria-label="スライドパズル盤面"></div>
+
+    <div class="btns">
+      <button id="shuffleBtn">シャッフル</button>
+      <button id="resetBtn" class="secondary">最初に戻す</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast">クリア！🎉</div>
+
+<script>
+(() => {
+  const size = 3;
+  const boardEl = document.getElementById("board");
+  const movesEl = document.getElementById("moves");
+  const timeEl  = document.getElementById("time");
+  const toastEl = document.getElementById("toast");
+  const shuffleBtn = document.getElementById("shuffleBtn");
+  const resetBtn   = document.getElementById("resetBtn");
+
+  let tiles = [];
+  let moves = 0;
+  let startAt = 0;
+  let timerId = null;
+  let cleared = false;
+
+  function initSolved(){
+    tiles = [];
+    for (let i = 1; i < size * size; i++) tiles.push(i);
+    tiles.push(0); // 空白
+  }
+
+  function startTimer(){
+    stopTimer();
+    startAt = performance.now();
+    timerId = setInterval(() => {
+      const sec = Math.floor((performance.now() - startAt) / 1000);
+      timeEl.textContent = sec.toString();
+    }, 250);
+  }
+
+  function stopTimer(){
+    if (timerId) clearInterval(timerId);
+    timerId = null;
+  }
+
+  function updateStats(){
+    movesEl.textContent = moves.toString();
+  }
+
+  function neighbors(idx){
+    const row = Math.floor(idx / size);
+    const col = idx % size;
+    const n = [];
+    if (row > 0) n.push(idx - size);
+    if (row < size - 1) n.push(idx + size);
+    if (col > 0) n.push(idx - 1);
+    if (col < size - 1) n.push(idx + 1);
+    return n;
+  }
+
+  function move(index, countMove=true){
+    if (cleared) return;
+    const emptyIndex = tiles.indexOf(0);
+    const canMove = neighbors(emptyIndex).includes(index);
+    if (!canMove) return;
+
+    [tiles[index], tiles[emptyIndex]] = [tiles[emptyIndex], tiles[index]];
+    if (countMove){
+      moves++;
+      updateStats();
+      // 触感フィードバック（対応端末のみ）
+      if (navigator.vibrate) navigator.vibrate(8);
+    }
+    render();
+
+    if (isClear()){
+      cleared = true;
+      showToast();
+      stopTimer();
+      // クリア後の誤操作を防ぐため少し待ってからシャッフル可能に
+    }
+  }
+
+  // 「必ず解ける」シャッフル：完成形から合法手をランダムにN回動かす
+  function shuffleByMoves(steps = 120){
+    initSolved();
+    let empty = tiles.indexOf(0);
+    let prevEmpty = -1;
+
+    for (let s = 0; s < steps; s++){
+      const opts = neighbors(empty).filter(i => i !== prevEmpty);
+      const pick = opts[Math.floor(Math.random() * opts.length)];
+      prevEmpty = empty;
+      // 空白に隣のタイルを滑らせる（＝tiles[pick]とtiles[empty]を交換）
+      [tiles[pick], tiles[empty]] = [tiles[empty], tiles[pick]];
+      empty = pick;
+    }
+
+    // たまに完成形に戻るのを避ける
+    if (isClear()) shuffleByMoves(steps + 40);
+  }
+
+  function isClear(){
+    for (let i = 0; i < tiles.length - 1; i++){
+      if (tiles[i] !== i + 1) return false;
+    }
+    return tiles[tiles.length - 1] === 0;
+  }
+
+  function render(){
+    boardEl.innerHTML = "";
+    tiles.forEach((num, index) => {
+      const div = document.createElement("div");
+      div.className = "tile";
+      if (num === 0){
+        div.classList.add("empty");
+        div.setAttribute("aria-label","空白");
+      } else {
+        div.textContent = num;
+        div.setAttribute("role","button");
+        div.setAttribute("aria-label", `タイル${num}`);
+        // クリック/タップ
+        div.addEventListener("click", () => move(index), { passive:true });
+      }
+      boardEl.appendChild(div);
+    });
+  }
+
+  function showToast(){
+    toastEl.classList.add("show");
+    setTimeout(() => toastEl.classList.remove("show"), 1400);
+  }
+
+  function startNewGame(){
+    cleared = false;
+    moves = 0;
+    updateStats();
+    timeEl.textContent = "0";
+    shuffleByMoves(140);   // 少し長め＝ほどよく混ざる
+    render();
+    startTimer();
+  }
+
+  function resetGame(){
+    cleared = false;
+    moves = 0;
+    updateStats();
+    timeEl.textContent = "0";
+    initSolved();
+    render();
+    startTimer();
+  }
+
+  shuffleBtn.addEventListener("click", startNewGame, { passive:true });
+  resetBtn.addEventListener("click", resetGame, { passive:true });
+
+  // 初期化
+  resetGame();
+
+  // 初回表示のズレ対策（スマホのアドレスバー伸縮など）
+  window.addEventListener("resize", () => {
+    // 盤面はCSSのaspect-ratioで維持されるのでここは軽く再描画のみ
+    render();
+  }, { passive:true });
+})();
+</script>
+</body>
+</html>
